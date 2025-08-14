@@ -1,0 +1,178 @@
+---
+title: "Carillon Bell Analysis"
+author: "Mackenzie (Mac) Walker"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{css, echo=FALSE}
+body {
+  font-family: 'Times New Roman', Times, serif;
+}
+```
+
+####### Relevant Pacakages
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(vegan)
+library(MASS)
+library(mvabund)
+```
+
+### Canonical Correlation Analysis (CCA)
+
+```{r}
+Data <- read.csv("bellinfo.csv")
+Tone <- Data[,c(2:11)]
+Dim.Year <- Data[,c(12:16)]
+
+Bell.Cor <- CCorA(Y = Tone, X = Dim.Year, permutations = 5000)
+
+Bell.Cor$p.perm
+Bell.Cor$p.Pillai
+```
+
+Based on outputs, there is evidence to suggest that the Tone (comprised of all 10 Tone variables) and Dim.Year (comprised of the Year and Dimension variables) variable sets are related.
+
+*The permutation p-value:*
+
+-   0.00039992 (\<0.05)
+
+-   Very small p-value, suggesting that we have grounds to reject the null hypothesis, which is that there is no evidence of significant linear associations between the two variable sets.
+
+*Pillai's Trace:*
+
+-   0.0001441089 (\<0.05)
+
+-   Once again p-value is extremely small, suggesting that it is best to reject H0 as there is evidence to suggest that we have linear associations of significance between the two variable sets.
+
+```{r, fig.width=8, fig.height=8, fig.align='center'}
+Bell.Cor$CanCorr
+biplot(Bell.Cor)
+```
+
+**Bioplot Interpretation...**
+
+*First Row: Plot of canonical variate scores*
+
+-   Outliers can be seen in the bottom right of both plots - looks like 'obj38' and 'obj39' in both plots;
+-   These outliers most likely have rather unusual year, dimension and tone characteristics
+
+*Second Row: Plot of correlations between original variables and the first two canonical variates*
+
+-   Frequency Tone variables are well represented and strongly positively correlated with CanAxis1. Whereas Deviation Tone variables (excluding TierceDev) show a weaker relationship with CanAxis1, rather being fairly negatively correlated with CanAxis2 (QuintDev - slightly weaker correlation). TierceDev differs, being somewhat negatively correlated with CanAxis1, and poorly represented on CanAxis2.
+
+-   The Year variable is well represented by the first two canonical axes. Year is strongly negatively correlated with CanAxis2, and a moderate positive correlation with CanAxis1. Dimension variables: Height, Diam and Thick are also well represented by CanAxis1, with strong negative correlations. Weight not represented quite aswell, but still sharing the negative correlation with CanAxis2, and not really being represented by CanAxis1.
+
+```{r, collapse=TRUE}
+round(Bell.Cor$corr.X.Cx, 2)
+round(Bell.Cor$corr.Y.Cy, 2)
+```
+
+#### → Now looking specifically bells from 1925, & dividing these into groups by size ('Small', 'Medium', 'Large')
+
+```{r}
+Bell.1925 <- Data %>% 
+  subset(Year == "1925") 
+
+Large <- Bell.1925[c(1:10),]
+Medium <- Bell.1925[c(11:20),]
+Small <- Bell.1925[c(21:31),]
+
+Bell.1925 <- Data %>% 
+  subset(Year == "1925")
+
+Bell.1925$Size <- c(rep("Large", 10), rep("Medium", 10), rep("Small", 11))
+
+Dev.1925 <- as.matrix(Bell.1925[, c(3,5,7,9,11)])
+```
+
+### Checking for Equal Covariance Between Groups, Multivariate Levenes' Test
+
+```{r}
+mod <- manova(Dev.1925~factor(Bell.1925$Size))
+Bell.1925.Resid <- mod$residuals
+Bell.1925.Resid <- abs(Bell.1925.Resid)
+
+modperm <- manylm(Bell.1925.Resid~factor(Bell.1925$Size), cor.type = 'R', test = 'F')
+anova(modperm, resamp = 'perm.resid')
+```
+
+-   P-value = (\>0.05);
+-   Evidence to accept the null hypothesis that variances across groups are equal.
+-   However, barely larger then the level of significance
+-   Value will change with every run of permutations - p-value can often move to fall bellow 0.05, suggesting that we may have an issue with our assumption of equal covariances
+
+##### **Relevant Plots**
+
+```{r, fig.width = 8, fig.height = 4}
+par(mfrow = c(1, 2))
+boxplot(mod$residuals[,1] ~ Bell.1925$Size, main="Residuals")
+boxplot(abs(mod$residuals[,1]) ~ Bell.1925$Size, main="Absolute Residuals")
+par(mfrow = c(1,1))  
+```
+
+-   Large group is definitely wider, however all means are centered around 0, so this does not mean that it is necessarily greater then the other groups
+
+*Box plot of absolute residuals*
+
+-   Asymmetric, constrained to be positive
+
+### Checking Assumption of Multivariate Normality
+
+##### **Mahalanobis distance & Chi-squared goodness-of-fit test**
+
+```{r, fig.align='center'}
+sigma <- summary(mod)$SS$Resid/(nrow(Bell.1925)-3)
+Bell.Mahal <- mahalanobis(mod$residuals,0,sigma)
+
+qqplot(qchisq(ppoints(nrow(Bell.1925)),ncol(mod$resid)),y=Bell.Mahal, xlab="Chi-Sq quantiles",
+       ylab="Bell Freq Deviations Mahalaobis distances")
+qqline(Bell.Mahal, distribution=function(p) qchisq(p, df=ncol(mod$resid)))
+```
+
+-   loosely follows normal, potential tails, would typically expect points towards the end to go of into the distance... 
+- **Want to confirm using the the Kolmogorov-Smirnov test**
+
+```{r}
+ks.test(Bell.Mahal, "pchisq", 5)
+```
+
+-   p-value 0.04 (\<0.05)
+
+-   Provides evidence that data does not follow the what we would expect to see of a chi squared distribution
+
+-   Likely issue regarding the assumption of multivariate normality - most likely that it is best to proceed with permutation
+
+### MANOVA & Permutation Testing
+
+Due to issues with our assumption of multivariate normality, and also likely issues with the of equal covariances with our data likely best to preform an **permutation test** rather than a parametric test.
+
+```{r}
+mod2 <- manylm(Dev.1925~factor(Bell.1925$Size), cor.type = "R", test = "F")
+anova(mod2, resamp = "perm.resid")
+```
+
+-   p-value: 0.009 (\<0.05)
+-   Anova p-value - overall significance for differences across the size groups
+
+```{r}
+summary(mod2, resamp = "perm.resid")
+```
+
+-   Can see difference between 'Large' bells, and that which are 'Medium' and 'Small';
+-   Greatest difference in f-value seen between 'Large' and 'Medium' bells;
+-   Based greater significance in regards to the difference when compared to 'Large' (our baseline) can be seen with 'Small' with a smaller p-value than that of 'Medium'
+
+```{r}
+print(mod2, digits = 1)
+```
+
+-   Significant frequency deviations seen in the baseline 'Large' Bells.
+-   'Small' (-15.4) and 'Medium' bells (-13.4) can be seen to have the largest frequency deviation compared to 'Large' (-11.7) bells when looking at TierceDev, 'Small' the most;
+-   For the most part we see minimally greater deviations in frequency for 'Small' and 'Medium' bells compared to the intercept, with extremly marginal difference seen with 'Small' bells in regard to PrimeDev (-0.8), and even less so with 'Medium' bells in regard to NominalDev(0.1) - practically the same;
+-   Aside from the rather larger decrease in frequency deviation which can be seen in 'Small' bell for QuintDev (6.8)
