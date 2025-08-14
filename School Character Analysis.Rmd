@@ -1,0 +1,171 @@
+---
+title: "School Character Analysis"
+author: "Mackenzie (Mac) Walker"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{css, echo=FALSE}
+body {
+  font-family: 'Times New Roman', Times, serif;
+}
+```
+
+####### Relevant Packages
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(vegan)
+library(MASS)
+```
+
+### Overview: Manhattan vs Euclidean Distances
+
+Constructing examples with equal Manhattan distances but differing Euclidean distances
+
+```{r,collapse=TRUE}
+A <- c(2,2,2,2,2,2,2,2,2,2,2)
+B <- c(4,2,2,2,2,2,2,2,2,2,2)
+C <- c(1,3,2,2,2,2,2,2,2,2,2)
+
+AB <- rbind(A,B)
+AC <- rbind(A,C)
+
+dist(AB, method = "euclidean")
+dist(AC, method = "euclidean")
+
+dist(AB, method = "manhattan")
+dist(AC, method = "manhattan")
+```
+
+-   **Euclidean distance** is the 'normal' distances, which is the sq root taken from the the sum of each variables difference. Therefore euclidean distance essentially works out a straight line by pulling points together.
+-   **Manhattans distance** on the other hand instead works using the sum of the absolute values; In doing so all points are given an equal weighting and it treats overall difference as additive and accumulate change.
+
+### Metric Multi-Dimensional Scaling (MDS)
+
+```{r}
+data <- read_csv("SchChar.csv", show_col_types = FALSE)
+```
+
+##### **Plotting Eigenvalues**
+
+```{r, fig.align='center'}
+Sch.Resp <- data[,c(2:12)]
+Man.Sch.Resp <- dist(Sch.Resp, method = "manhattan")
+cmds.Sch.Resp <- cmdscale(Man.Sch.Resp, eig = TRUE)
+plot(cmds.Sch.Resp$eig,
+        main = "Plot of Eigenvalues",
+        ylab = "Eigenvalue",
+        xlab = "Dimension")
+```
+
+-   Are able to see most variance is held in the first dimension;
+-   When looking for the 'elbow', can see drop of after 2, could also looked at the 3rd and 4th dimensions, as there seems to be potentially a small drop off, before it pretty much completely flattens out after 4.
+
+##### **Selecting Dimensions**
+
+```{r}
+k_values <- 2:4
+for (k in k_values) {
+  cmds <- cmdscale(Man.Sch.Resp, k = k, eig = TRUE)
+  cat("k =", k, "GOF:", cmds$GOF, "\n")
+}
+```
+
+-   Can see small increases in the proportion of original distances which are able to be represented with the inclusion of additional dimensions based on the goodness-of-fit output;
+
+-   However these are not drastic increases - Indicating that third and fourth dimensions likely do not capture any great amount of variance, with most seeming to be represented in the first.
+
+-   Given this, <ins>we will use the two dimensional model</ins>, with it capturing a significant amount of the variance, and will be easier to visualize
+
+```{r, fig.align='center'}
+cmds.Sch.Resp2 <- cmdscale(Man.Sch.Resp, k = 2, eig = TRUE)
+
+plot(Man.Sch.Resp, dist(cmds.Sch.Resp2$points))
+abline(lm(dist(cmds.Sch.Resp2$points)~Man.Sch.Resp), col = 2)
+summary(lm(dist(cmds.Sch.Resp2$points)~Man.Sch.Resp))
+```
+
+-   Somewhat good fit visually, more deviation towards the lower end;
+
+-   R squared = 0.88, indicating a reasonably good fit
+
+```{r, fig.align='center'}
+shp <- Shepard(Man.Sch.Resp, cmds.Sch.Resp2$points)
+plot(shp)
+lines(shp$x, shp$yf, pch = ".", col = 2)
+```
+
+### MDS Plots by Location
+
+##### **Plot of first 2 dimensions, of 3D solution**
+
+```{r, fig.align='center'}
+cmds.Sch.Resp3 <- cmdscale(Man.Sch.Resp, k = 3, eig = TRUE)
+
+plot(cmds.Sch.Resp3$points[,1:2], col=as.numeric(as.factor(data$location)), pch= as.numeric(as.factor(data$location))-2,
+main='PCO (Euclidian dist, transformed counts)',
+xlab=paste(round((cmds.Sch.Resp3$eig/sum(abs(cmds.Sch.Resp3$eig)))[1]*100), "% of total variability - 1") ,
+ylab= paste(round((cmds.Sch.Resp3$eig/sum(abs(cmds.Sch.Resp3$eig)))[2]*100), "% of total variability - 2") ,
+xlim=c(-15, 18))
+legend("topleft", col= as.numeric(as.factor(data$location)),
+pch=unique(sort(as.numeric(as.factor(data$location))))-2,
+legend=unique(sort(paste(data$location))))
+```
+
+-   Data quite heavily dispersed;
+
+-   No clear grouping or clustering by location type 
+
+##### **Plot of first 2 dimensions, of 2D solution, faceted by location**
+
+```{r,fig.align='center', collapse=TRUE}
+df <- data.frame(PCO1 = cmds.Sch.Resp2$points[,1], 
+                 PCO2 = cmds.Sch.Resp2$points[,2], 
+                 Location = (data$location))
+df %>% 
+  ggplot(mapping = aes(x = PCO1, 
+                       y = PCO2)) + 
+  facet_wrap(vars(Location)) + 
+  geom_point() 
+
+num.loc <- table(data$location)
+print(num.loc)
+```
+
+-   **City Schools:** Spread more heavily along PCO1, potential outliers
+
+-   **Suburban Schools:** Again slighter more spread along PCO1, slightly shifted towards the left on this axis as well
+
+-   **Town Schools & Village.Rural Schools:** Seems pretty random - quite a few less Town and Village.Rural schools (19 and 20 respectively) then that of city (38) and Suburban (32)
+
+### PERMANOVA
+
+##### **Testing for significant location-based differences**
+
+```{r}
+perm <- adonis2(Sch.Resp~data$location, permutations = 999)
+print(perm)
+```
+
+-   Highly significant p-value (\<0.05)
+-   Suggest that this is a mean differences rather then a a difference dispersion, with no real clear trends or clustering seen in plots above.
+
+### Composite Scoring Evaluation
+
+##### <ins>Scenario</ins>: Responding to colleague suggestion, based on evaluation - just adding up the school character scores to create an overall character metric, as all are oriented in the same way
+
+```{r}
+df <- df %>% 
+  mutate(overall.scores = rowSums(data[, 2:12]))
+
+round(cor(cbind(PCO1 = df$PCO1, PCO2 = df$PCO2, OverallScores = df$overall.scores)), 4) %>% 
+  as.table()
+```
+
+-   Strong correlation with PCO1 with overall scores,
+-   Weak correlation between PCO2 and overall scores
+-   PCO1 captures a lot of the variance, but simple overall sum has the potential to result in loss of the finer details and important information.
