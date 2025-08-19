@@ -20,7 +20,7 @@ This project looks at the relationship between the physical characteristics of t
 
 ### 2) School Character Analysis
 
-This project unpacks data from the New Zealand TIMMS (Trends in International Mathematics and Science Study) 2023, school principal survey. The aim being to explore if there is a relationship between how school location influences school character ratings. 
+The project models and forecasts New Zealand’s real hourly earnings using ETS and ARIMA methods. It identifies the most accurate model through comparison and out-of-sample validation. 
 
 #### Flow of Key Tasks: 
 
